@@ -116,7 +116,10 @@ See placeholder code here for help.
 library(tidyverse, tidymodels)
 library(goeveg)
 library(DescTools)
-
+library(dplyr)
+library(lmerTest)
+install.packages("effsize")
+library(effsize)
 
 # Define function read_pitch()
 read_pitch <- function(filename) {
@@ -143,14 +146,9 @@ read_pitch <- function(filename) {
     return(data)
 }
 
-
-# test it on just one file while writing the function
-test_data = read_pitch()
-
-
 # when you've created a function that works, you can
-pitch_data = list.files(path = "~/Dropbox/R/Class/Assignment3/data/Pitch/", pattern = ".txt", full.names = TRUE) %>%  ## NB replace with your path to the files 
-    purrr::map_df(read_pitch)
+pitch_data = list.files(path = "~/Desktop/Cognitive Science/Cognitive Science 3rd semester/Experimental Methods 3/Afleveringer/Assignment_3/data/Pitch", pattern = ".txt", full.names = TRUE)
+pitch_data <- pitch_data %>% ppurrr::map_df(read_pitch)
 
 
 # Writing a csv of the data-file
@@ -162,7 +160,7 @@ write_csv(pitch_data, "pitch_data.csv")
 
 ```{r}
 # Let's start with the demographic and clinical data
-dataDemo <- read.csv("~/Dropbox/R/Class/Assignment3/data/DemographicData.csv", sep = ";")
+dataDemo <- read.csv("~/Desktop/Cognitive Science/Cognitive Science 3rd semester/Experimental Methods 3/Afleveringer/Assignment_3/data/DemographicData.csv", sep = ";")
 
 dataDemo <- dataDemo %>%
     filter(Study == 1 | Study == 2 | Study == 3 | Study == 4) %>% # filter only danish studies
@@ -179,7 +177,7 @@ dataDemo$diagnosis <- as.factor(dataDemo$diagnosis)
 
 
 # then duration data
-dataDur <- read.csv("~/Dropbox/R/Class/Assignment3/data/articulation.txt")
+dataDur <- read.csv("~/Desktop/Cognitive Science/Cognitive Science 3rd semester/Experimental Methods 3/Afleveringer/Assignment_3/data/articulation.txt")
 
 
 dataDur$study <- dataDur$soundname %>% str_extract("Study\\d") %>% str_extract("\\d")
@@ -194,7 +192,7 @@ dataDur <- dataDur %>%
 
 
 # Finally the pitch data
-dataPitch <- read.csv("~/Dropbox/R/Class/Assignment3/pitch_data.csv")
+dataPitch <- read.csv("~/Desktop/Cognitive Science/Cognitive Science 3rd semester/Experimental Methods 3/Afleveringer/Assignment_3/pitch_data.csv")
 dataPitch <- dataPitch %>% 
     filter(study == 1 | study == 2 | study == 3 | study == 4)
 
@@ -239,7 +237,11 @@ data %>%
               age = mean(Age, na.rm = T),
               Negative_symptoms = mean(SANS, na.rm = T),
               Positive_symptoms = mean(SAPS, na.rm = T),
-              IQ = mean(TotalIQ, na.rm = T))
+              IQ = mean(TotalIQ, na.rm = T),
+              meanPitch = mean(mean, na.rm = T),
+              medianPitch = median(median, na.rm = T),
+              sdPitch = mean(sd, na.rm = T)
+    )
 
 # merging by study
 data %>% 
@@ -251,8 +253,27 @@ data %>%
               age = mean(Age, na.rm = T),
               Negative_symptoms = mean(SANS, na.rm = T),
               Positive_symptoms = mean(SAPS, na.rm = T),
-              IQ = mean(TotalIQ, na.rm = T))
+              IQ = mean(TotalIQ, na.rm = T),
+              meanPitch = mean(mean, na.rm = T),
+              medianPitch = median(median, na.rm = T),
+              sdPitch = mean(sd, na.rm = T)
+    )
 
+# Group by study and diagnosis
+data %>% 
+    filter(trial == 1) %>% 
+    group_by(study, diagnosis) %>% 
+    summarize(participants = n(),
+              male = sum(Gender=="M", na.rm = T),
+              female = sum(Gender=="F", na.rm = T),
+              age = mean(Age, na.rm = T),
+              Negative_symptoms = mean(SANS, na.rm = T),
+              Positive_symptoms = mean(SAPS, na.rm = T),
+              IQ = mean(TotalIQ, na.rm = T),
+              meanPitch = mean(mean, na.rm = T),
+              medianPitch = median(median, na.rm = T),
+              sdPitch = mean(sd, na.rm = T)
+    )
 ```
 
 ## Now we can analyze the data
@@ -273,13 +294,56 @@ N.N.N.B. If you want to estimate the studies separately, you can try this syntax
 - Bonus points: cross-validate the models and report the betas and standard errors from all rounds to get an idea of how robust the estimates are. 
 
 ```{r}
-   set.seed(1)
-   x <- runif(7)
 
-   # Manually scaling
-   (x - mean(x)) / sd(x)
+# Calculate proportion of spoken time
+data$propSpokenTime <- data$phonationtime..s./data$dur..s.
 
-   scale(x)
+# Changing all npaue=0 to NAs because we cannot divide by zero. We are emitting all datapoints where number of pauses is registered as 0
+data$npause[data$npause==0] <- NA
+
+# Calculating pause duration
+data$pauseDuration <- (data$dur..s.-data$phonationtime..s.)/data$npause
+
+
+# Scaling pitch 
+data$pitchScaledFulll <- scale(data$mean)
+
+# Scaling all variables by study 
+data <- data %>% group_by(study) %>% mutate(pitchScaled = scale(mean),
+                                           speechrateScaled = scale(speechrate..nsyll.dur.),
+                                           pauseDurationScaled = scale(pauseDuration),
+                                           propSpokenTimeScaled = scale(propSpokenTime),
+                                           medianPitchScaled = scale(median))
+
+# Changing study column to factor
+data$study <- as.factor(data$study)
+
+# Estimating the studies seperately 
+byStudyPause <- lmer(pauseDurationScaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
+summary(byStudyPause)
+
+byStudyPitch <- lmer(pitchScaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
+summary(byStudyPitch)
+
+byStudySpeechrate <- lmer(speechrateScaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
+summary(byStudySpeechrate)
+
+byStudySpokenTime <- lmer(propSpokenTime ~ 0 + study + diagnosis:study + (1 | uID), data=data)
+summary(byStudySpokenTime)
+
+
+# Modelling all of the data
+modelPause <- lmer(pauseDurationScaled ~ 1 + diagnosis + (1 + study | uID) , data = data)
+summary(modelPause)
+
+modelPitch <- lmer(pitchScaled ~ 1 + diagnosis + (1 + study | uID) , data = data)
+summary(modelPitch)
+
+modelSpeechrate <- lmer(speechrateScaled ~ 1 + diagnosis + (1 + study | uID) , data = data)
+summary(modelSpeechrate)
+
+modelPropSpokenTime <- lmer(propSpokenTime ~ 1 + diagnosis + (1 + study | uID) , data = data)
+summary(modelPropSpokenTime)
 ```
 
 ## N.B. Remember to save the acoustic features of voice in a separate file, so to be able to load them next time
