@@ -1,6 +1,6 @@
 ---
 title: "Assignment 3 - Part 1 - Voice In Schizophrenia"
-author: "Bertram Hojer"
+author: "Jakob Grøhn"
 date: "October 23, 2019"
 output: html_document
 editor_options: 
