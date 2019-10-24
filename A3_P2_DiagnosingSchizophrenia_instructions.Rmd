@@ -1,0 +1,97 @@
+---
+title: "Assignment 3 - Part 2 - Diagnosing Schizophrenia from Voice"
+author: "Riccardo Fusaroli"
+date: "October 17, 2017"
+output: 
+  md_document:
+    variant: markdown_github 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(pacman, tidyverse, tidymodels, groupdata2, lmerTest)
+allData <- read.csv('full_data.csv')
+```
+
+## Assignment 3 - Part 2 - Diagnosing schizophrenia from voice
+
+In the previous part of the assignment you generated a bunch of "features", that is, of quantitative descriptors of voice in schizophrenia. We then looked at whether we could replicate results from the previous literature.
+We now want to know whether we can automatically diagnose schizophrenia from voice only, that is, relying on the set of features you produced last time, we will try to produce an automated classifier.
+Again, remember that the dataset containst 7 studies and 3 languages. Feel free to only include Danish (Study 1-4) if you feel that adds too much complexity.
+
+Issues to be discussed your report:
+- Should you run the analysis on all languages/studies at the same time? 
+- Choose your best acoustic feature from part 1. How well can you diagnose schizophrenia just using it?
+- Identify the best combination of acoustic features to diagnose schizophrenia using logistic regression.
+- Discuss the "classification" process: which methods are you using? Which confounds should you be aware of? What are the strength and limitation of the analysis?
+- Bonus question: Logistic regression is only one of many classification algorithms. Try using others and compare performance. Some examples: Discriminant Function, Random Forest, Support Vector Machine, etc. The package caret provides them. 
+- Bonus Bonus question: It is possible combine the output of multiple  classification models to improve classification accuracy. For inspiration see,
+https://machinelearningmastery.com/machine-learning-ensembles-with-r/
+ The interested reader might also want to look up 'The BigChaos Solution to the Netflix Grand Prize'
+
+## Learning objectives
+- Learn the basics of classification in a machine learning framework
+- Design, fit and report logistic regressions
+- Apply feature selection techniques
+
+### Let's start
+
+We first want to build a logistic regression to see whether you can diagnose schizophrenia from your best acoustic feature. Let's use the full dataset and calculate the different performance measures (accuracy, sensitivity, specificity, PPV, NPV, ROC curve). You need to think carefully as to how we should (or not) use study and subject ID.
+
+Then cross-validate the logistic regression and re-calculate performance on the testing folds. N.B. The cross-validation functions you already have should be tweaked: you need to calculate these new performance measures. Alternatively, the groupdata2 and cvms package created by Ludvig are an easy solution. 
+
+N.B. the predict() function generates log odds (the full scale between minus and plus infinity). Log odds > 0 indicates a choice of 1, below a choice of 0.
+N.N.B. you need to decide whether calculate performance on each single test fold or save all the prediction for test folds in one datase, so to calculate overall performance.
+N.N.N.B. Now you have two levels of structure: subject and study. Should this impact your cross-validation?
+N.N.N.N.B. A more advanced solution could rely on the tidymodels set of packages (warning: Time-consuming to learn as the documentation is sparse, but totally worth it)
+
+
+
+```{r}
+# Partioning data into test and training set
+allData <- fold(data = allData, k = 5, cat_col = 'diagnosis', id_col = "uID")
+
+test_data <- allData %>% filter(.folds==5)
+train_data <- allData %>% filter(.folds!=5)
+
+# Predicting diagnoisis from pause duration
+logPauseDur <- glmer(diagnosis ~ 1 + pauseDurationScaled*speechrateScaled*propSpokenTimeScaled + (1 | uID) , data = train_data, family='binomial')
+
+#Confusion matrix
+predicted_values <- predict(logPauseDur, test_data, allow.new.levels = T) 
+
+# Making dataframe with predicted values and uID's
+sum_df <- data.frame(predictions = predicted_values, ID=test_data$uID)
+sum_df <- na.omit(sum_df) 
+# Calculating mean predicted value for each ID
+pred_sum <- aggregate(x = sum_df$predictions, by = list(sum_df$ID), FUN = mean)
+# Making dataframe including only trial one for each participant
+id <- test_data %>% filter(test_data$trial==1)
+
+# Making prediction dataframe with mean predicted value
+pred_df <- data.frame(predictions = pred_sum, actual = id$diagnosis)
+pred_df$predictions.x = ifelse(pred_df$predictions.x < 0, "0", "1")
+pred_df$predictions.x <- as.factor(pred_df$predictions.x) 
+pred_df$actual <- as.factor(pred_df$actual) 
+
+# Making confusion matrix
+caret::confusionMatrix(pred_df$predictions.x, pred_df$actual, positive ="0")
+
+
+
+
+# Predicting diagnoisis from pitch
+logPitch <- glmer(diagnosis ~ 1 + pitchScaled + (1 | uID) , data = train_data, family='binomial')
+
+#Confusion matrix
+predicted_pitch <- predict(logPitch, test_data, allow.new.levels = T) 
+
+pred_pitch <- data.frame(predictions = predicted_pitch, actual = test_data$diagnosis)
+pred_pitch$predictions = ifelse(pred_pitch$predictions < 0.0, "0", "1")
+pred_pitch <- na.omit(pred_pitch) 
+pred_pitch$predictions <- as.factor(pred_pitch$predictions) 
+pred_pitch$actual <- as.factor(pred_pitch$actual) 
+
+caret::confusionMatrix(pred_pitch$predictions, pred_pitch$actual, positive ="0")
+```
+

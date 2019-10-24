@@ -2,7 +2,9 @@
 title: "Assignment 3 - Part 1 - Voice In Schizophrenia"
 author: "Jakob Grøhn"
 date: "October 23, 2019"
-output: html_document
+output: 
+  md_document:
+    variant: markdown_github 
 editor_options: 
   chunk_output_type: console
 ---
@@ -344,6 +346,9 @@ summary(modelSpeechrate)
 
 modelPropSpokenTime <- lmer(propSpokenTime ~ 1 + diagnosis + (1 + study | uID) , data = data)
 summary(modelPropSpokenTime)
+
+# Save final data as csv
+write_csv(data, "full_data.csv")
 ```
 
 ## N.B. Remember to save the acoustic features of voice in a separate file, so to be able to load them next time
