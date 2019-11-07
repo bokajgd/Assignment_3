@@ -204,10 +204,10 @@ test_results %>%
   knitr::kable()
 
 
-# Plotting area-under-the-curve (ROC-curve)
-test_results %>% 
-  roc_curve(truth = diagnosis, log_prob) %>%
-  autoplot()
+# # Plotting area-under-the-curve (ROC-curve)
+# test_results %>% 
+#   roc_curve(truth = diagnosis, log_prob) %>%
+#   autoplot()
 
 # Cross validation of grouped data
 cv_folds <- vfold_cv(df_train, v = 5, repeats = 2, strata = diagnosis, group = uID)
@@ -273,6 +273,8 @@ eval <- cv_folds %>%
 ```{r}
 dataList = list(groupedData1, groupedData2, groupedData3,
             groupedData4, groupedData5, groupedDataCombined)
+
+allPredictions <- data.frame()
 
 for (df in dataList){
   df_list <- partition(df, p = 0.2, cat_col = c("diagnosis", "study"), list_out = T)
@@ -346,8 +348,6 @@ for (df in dataList){
   }
 }
 
-allPredictions <- data.frame()
-
 absmax <- function(x) {x[which.max ( abs(x) )]}
 
 ulala <- list()
@@ -396,11 +396,18 @@ prediction_df$predDiagnosis <- as.factor(prediction_df$predDiagnosis)
 prediction_df$actual <- as.factor(prediction_df$actual)
 
 caret::confusionMatrix(prediction_df$predDiagnosis, prediction_df$actual, positive="0")
+
+pacman::p_load(precrec)
+
+precrec_obj <- evalmod(scores = as.numeric(predData$predDiagnosis)-1, labels = as.numeric(predData$actual)-1)
+autoplot(precrec_obj)
+
+citation("precrec")
 ```
 
 ```{r}
 p_load(caretEnsemble, caret, randomForest)
-train_ensemble <- groupedData %>% select(-uID)
+train_ensemble <- groupedData %>% select(-uID, -study)
 train_ensemble <- na.omit(train_ensemble)
 train_ensemble$diagnosis <- as.factor(train_ensemble$diagnosis)
 str(train_ensemble)
