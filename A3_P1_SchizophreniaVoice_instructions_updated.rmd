@@ -247,7 +247,7 @@ data %>%
               iqrPitch = mean(IQR, na.rm = T)
     )
 
-# merging by study
+# merging data by study
 data %>% 
     filter(trial == 1) %>% 
     group_by(study) %>% 

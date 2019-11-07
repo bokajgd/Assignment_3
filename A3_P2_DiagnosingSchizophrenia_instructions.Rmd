@@ -75,7 +75,7 @@ groupedData <- merged_grouped %>% dplyr::rename(uID=Group.1)
 # Saving grouped data as csv file
 write_csv(merged_grouped, "groupedData.csv")
 
-# Making diag factors
+# Making diagnosis factors
 groupedData$diagnosis <- as.factor(groupedData$diagnosis) 
 ```
 
