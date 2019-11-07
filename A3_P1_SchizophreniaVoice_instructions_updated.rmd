@@ -173,6 +173,7 @@ dataDemo <- dataDemo %>%
         diagnosis = Diagnosis,
         )
 
+# Preprocessing demo data
 dataDemo$diagnosis <- as.character(dataDemo$diagnosis)
 dataDemo$diagnosis[dataDemo$diagnosis=="Control"] <-  "0"
 dataDemo$diagnosis[dataDemo$diagnosis=="Schizophrenia"] <-  "1"
@@ -182,7 +183,7 @@ dataDemo$diagnosis <- as.factor(dataDemo$diagnosis)
 # then duration data
 dataDur <- read.csv("~/Desktop/Cognitive Science/Cognitive Science 3rd semester/Experimental Methods 3/Afleveringer/Assignment_3/data/articulation.txt")
 
-
+# Preprocessing dur data
 dataDur$study <- dataDur$soundname %>% str_extract("Study\\d") %>% str_extract("\\d")
 dataDur$diagnosis <- dataDur$soundname %>% str_extract("D\\d") %>% str_extract("\\d")
 dataDur$subj <- dataDur$soundname %>% str_extract("S\\d++") %>% str_extract("\\d+")

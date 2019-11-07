@@ -51,6 +51,7 @@ N.N.N.N.B. A more advanced solution could rely on the tidymodels set of packages
 
 ```{r}
 # Making a dataframe grouped by participant 
+# Grouping each variable by participant
 grouped_iqr <- aggregate(x = allData$IQR, by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(IQR=x)
 grouped_sd <- aggregate(x = allData$sd, by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(sd=x)
 grouped_pauseDuration <- aggregate(x = allData$pauseDuration, by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(pauseDuration=x)
@@ -60,6 +61,7 @@ grouped_diagnosis <- aggregate(x = as.numeric(allData$diagnosis), by = list(allD
 grouped_study <- aggregate(x = as.numeric(allData$study), by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(study=x)
 
 
+# Merged grouped data frames
 merged_grouped <- merge(grouped_iqr, grouped_pauseDuration, by="Group.1")
 merged_grouped <- merge(merged_grouped, grouped_propSpokenTime, by="Group.1")
 merged_grouped <- merge(merged_grouped, grouped_speechrate, by="Group.1")
@@ -67,16 +69,12 @@ merged_grouped <- merge(merged_grouped, grouped_sd, by="Group.1")
 merged_grouped <- merge(merged_grouped, grouped_study, by="Group.1")
 merged_grouped <- merge(merged_grouped, grouped_diagnosis, by="Group.1")
 
+# Changing Group.1 collumn name to uID
 groupedData <- merged_grouped %>% dplyr::rename(uID=Group.1)
 
+# Saving grouped data as csv file
 write_csv(merged_grouped, "groupedData.csv")
 
-
-merged_grouped %>% 
-  group_by(diagnosis) %>%
-  summarize(participant=n(), 
-            pauseDur = mean(pauseDuration, na.rm=T))
-                                                     
 # loading grouped data
 groupedData$diagnosis <- as.factor(groupedData$diagnosis)
 ```
@@ -103,23 +101,23 @@ groupedDataSD <-  groupedData %>%
 
 groupedData1 <- groupedData %>% 
   select(uID, diagnosis, study, IQR, pauseDuration, 
-         speechrate, propSpokenTime) %>% drop_na() # Pitch variablity model
+         speechrate, propSpokenTime) %>% drop_na() 
 
 groupedData2 <- groupedData %>% 
   select(uID, diagnosis, study, IQR, pauseDuration, 
-         speechrate, sd) %>% drop_na() # Pause duration model
+         speechrate, sd) %>% drop_na() 
 
 groupedData3 <- groupedData %>% 
   select(uID, diagnosis, study, IQR, pauseDuration, 
-         propSpokenTime, sd) %>% drop_na() # Speech rate model
+         propSpokenTime, sd) %>% drop_na() 
 
 groupedData4 <- groupedData %>% 
   select(uID, diagnosis, study, IQR, 
-         speechrate, propSpokenTime, sd) %>% drop_na() # Proportional of spoken time model
+         speechrate, propSpokenTime, sd) %>% drop_na() 
 
 groupedData5 <-  groupedData %>% 
   select(uID, diagnosis, study, pauseDuration, 
-         speechrate, propSpokenTime, sd) %>% drop_na() # Standard deviation model
+         speechrate, propSpokenTime, sd) %>% drop_na() 
 
 groupedDataCombined <- groupedData %>% 
   select(uID, diagnosis, study, IQR, pauseDuration, 
@@ -131,12 +129,10 @@ groupedDataCombined <- groupedData %>%
 
 # Running models & cross-validation
 ```{r}
-# partitioning the data using groupdata2
+# partitioning the data using groupdata2 by diagnosis and study as cat_cols
 df_list <- partition(groupedDataSD, p = 0.2, cat_col = c("diagnosis",'study'), list_out = T)
 
- # defining the test-set and removing ID-column
-#groupedPred <- df_list[[1]]
-
+ # defining the test-set and removing ID and study column
 df_test <- df_list[[1]]
 df_test <- df_test %>% 
   select(-uID, -study)
@@ -153,7 +149,7 @@ df_train <- df_train %>%
 rec <- df_train %>% recipe(diagnosis ~ .) %>% # defines outcome of pre-processing
   step_center(all_numeric()) %>% # centering all numeric values
   step_scale(all_numeric()) %>% # scaling all numeric values
-  step_corr(all_numeric()) %>% 
+  step_corr(all_numeric()) %>% # corr testing all predictors
   prep(training = df_train) # defining the train-set
 
 # extracting 'df_train' from rec_train (the recipe)
@@ -194,7 +190,7 @@ test_results <-
   )
 
 
-#  Investigating the metrics
+# Investigating the metrics
 metrics(test_results, truth = diagnosis, estimate = log_class) %>% 
   knitr::kable()
 
@@ -205,9 +201,9 @@ test_results %>%
 
 
 # # Plotting area-under-the-curve (ROC-curve)
-# test_results %>% 
-#   roc_curve(truth = diagnosis, log_prob) %>%
-#   autoplot()
+test_results %>%
+  roc_curve(truth = diagnosis, log_prob) %>%
+  autoplot()
 
 # Cross validation of grouped data
 cv_folds <- vfold_cv(df_train, v = 5, repeats = 2, strata = diagnosis, group = uID)
@@ -258,7 +254,7 @@ eval <- cv_folds %>%
   select(id, id2, metrics) %>% 
   unnest(metrics)
 
-#inspect performance metrics
+# inspect performance metrics
  eval %>% 
   select(repeat_n = id, fold_n=id2,metric = .metric, estimate = .estimate) %>% 
   spread(metric, estimate) %>% 
@@ -271,12 +267,16 @@ eval <- cv_folds %>%
 
 # Making a combined prediction from multiple models
 ```{r}
+# List of multiple models
 dataList = list(groupedData1, groupedData2, groupedData3,
             groupedData4, groupedData5, groupedDataCombined)
 
+# empty data frame
 allPredictions <- data.frame()
 
-for (df in dataList){
+
+# Creating loop to run through list of models
+for (df in dataList){ #Partitioning data
   df_list <- partition(df, p = 0.2, cat_col = c("diagnosis", "study"), list_out = T)
   
   # define test-set
@@ -341,41 +341,51 @@ for (df in dataList){
            diagnosis = as.numeric(diagnosis)-1,
            log_class = as.numeric(log_class)-1) 
   
-  if (NROW(allPredictions) < 1)  {
+  if (NROW(allPredictions) < 1)  { #saving test results into a dataframe
         allPredictions <- test_results
   } else {
     allPredictions <- cbind(allPredictions, test_results)
   }
 }
 
+# Function for extracting max deviation from 0.5
 absmax <- function(x) {x[which.max ( abs(x) )]}
 
+# creating empty list
 ulala <- list()
   
+# add max deviation value of probabilty of prediction between the five models from each participant into a list
 for (i in 1:44){
   ulala[i] <- absmax(allPredictions[i, c(3, 6, 9, 12, 15, 18)])
 }
 
+# transposing list into a vector
 ulala <- unlist(transpose(ulala))
 
-
+# Make new data fram with absolute values of deviations from 0.5
 absAllPredictions <- allPredictions
 absAllPredictions[, c(3, 6, 9, 12, 15, 18)] <- abs(allPredictions[, c(3, 6, 9, 12, 15, 18)])
 
+# Summing probability outputs for each prediction from each model for each participant
 sumLogProb = absAllPredictions[,3]+absAllPredictions[,6]+absAllPredictions[,9]+absAllPredictions[,12]+absAllPredictions[,15]+absAllPredictions[,18]
 
+# Calculating weighted sum of probabilities
 final <- absAllPredictions[,2]*(absAllPredictions[,3]/sumLogProb)+absAllPredictions[,5]*(absAllPredictions[,6]/sumLogProb)+absAllPredictions[,8]*(absAllPredictions[,9]/sumLogProb)+absAllPredictions[,11]*(absAllPredictions[,12]/sumLogProb)+absAllPredictions[,14]*(absAllPredictions[,15]/sumLogProb)+absAllPredictions[,17]*(absAllPredictions[,18]/sumLogProb)
 
+# Adding predictions from all 6 models together
 simplePred <- absAllPredictions[,2]+absAllPredictions[,5]+absAllPredictions[,8]+absAllPredictions[,11]+absAllPredictions[,14]+absAllPredictions[,17]
 
-
+# Adding 'weighted sum' probs and actual predictions to a data frame
 predData <- data.frame(predictions=final, actual=allPredictions[,1])
+# Turning weighted sum probabilities into diagnosis predictions
 predData$predDiagnosis <- ifelse(predData$predictions < 0.5, "0", "1")
 predData$predDiagnosis <- as.factor(predData$predDiagnosis)
 predData$actual <- as.factor(predData$actual)
 
+# Making confusion matrix
 caret::confusionMatrix(predData$predDiagnosis, predData$actual, positive="0")
 
+# Same for max prob method
 predData2 <- data.frame(predictions=ulala, actual=allPredictions[,1])
 predData2$predDiagnosis <- ifelse(predData2$predictions < 0, "0", "1")
 predData2$predDiagnosis <- as.factor(predData2$predDiagnosis)
@@ -383,6 +393,7 @@ predData2$actual <- as.factor(predData2$actual)
 
 caret::confusionMatrix(predData2$predDiagnosis, predData2$actual, positive="0")
 
+#Same for un-weighted sum method
 predData3 <- data.frame(predictions=simplePred, actual=allPredictions[,1])
 predData3$predDiagnosis <- ifelse(predData3$predictions < 3 , "0", "1")
 predData3$predDiagnosis <- as.factor(predData3$predDiagnosis)
@@ -390,6 +401,7 @@ predData3$actual <- as.factor(predData3$actual)
 
 caret::confusionMatrix(predData3$predDiagnosis, predData3$actual, positive="0")
 
+# Combining all three methods
 prediction_df <- data.frame(predWeight=as.numeric(predData$predDiagnosis)-1, predMax=as.numeric(predData2$predDiagnosis)-1, predSum=as.numeric(predData3$predDiagnosis)-1, actual=allPredictions[,1])
 prediction_df$predDiagnosis <- ifelse(prediction_df$predWeight+prediction_df$predMax+prediction_df$predSum < 2, "0", "1")
 prediction_df$predDiagnosis <- as.factor(prediction_df$predDiagnosis)
@@ -399,6 +411,7 @@ caret::confusionMatrix(prediction_df$predDiagnosis, prediction_df$actual, positi
 
 pacman::p_load(precrec)
 
+# Plotting roc-curve for weighted sum method 
 precrec_obj <- evalmod(scores = as.numeric(predData$predDiagnosis)-1, labels = as.numeric(predData$actual)-1)
 autoplot(precrec_obj)
 
@@ -406,6 +419,7 @@ citation("precrec")
 ```
 
 ```{r}
+# Attempting to stack multiple methods
 p_load(caretEnsemble, caret, randomForest)
 train_ensemble <- groupedData %>% select(-uID, -study)
 train_ensemble <- na.omit(train_ensemble)
@@ -415,8 +429,8 @@ levels(train_ensemble$diagnosis) <- c('control', 'schizo')
 
 control <- trainControl(method="repeatedcv", number=5, repeats=2, savePredictions=TRUE, classProbs=TRUE)
 algorithmList <- c('lda','svmRadial','rpart', 'glm', 'knn')
-model <- caretList(diagnosis~. , data=train_ensemble, trControl=control, methodList=algorithmList)
-results <- resamples(model)
+modls <- caretList(diagnosis~. , data=train_ensemble, trControl=control, methodList=algorithmList)
+results <- resamples(modls)
 summary(results)
 dotplot(results)
 
@@ -426,11 +440,11 @@ splom(results)
 
 # stack using glm
 stackControl <- trainControl(method="repeatedcv", number=5, repeats=2, savePredictions=TRUE, classProbs=TRUE)
-stack.glm <- caretStack(model, method="glm", metric="Accuracy", trControl=stackControl)
+stack.glm <- caretStack(modls, method="glm", metric="Accuracy", trControl=stackControl)
 print(stack.glm)
 
 # stack using random forest
-stack.rf <- caretStack(model, method="rf", metric="Accuracy", trControl=stackControl)
+stack.rf <- caretStack(modls, method="rf", metric="Accuracy", trControl=stackControl)
 print(stack.rf)
 ```
 
