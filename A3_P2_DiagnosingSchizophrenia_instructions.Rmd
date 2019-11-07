@@ -5,11 +5,13 @@ date: "October 17, 2017"
 output: 
   md_document:
     variant: markdown_github 
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-pacman::p_load(pacman, tidyverse, tidymodels, groupdata2, lmerTest)
+pacman::p_load(pacman, tidyverse, tidymodels, groupdata2, lmerTest, lme4, kernlab, ggplot2)
 allData <- read.csv('full_data.csv')
 ```
 
@@ -48,50 +50,380 @@ N.N.N.N.B. A more advanced solution could rely on the tidymodels set of packages
 
 
 ```{r}
-# Partioning data into test and training set
-allData <- fold(data = allData, k = 5, cat_col = 'diagnosis', id_col = "uID")
-
-test_data <- allData %>% filter(.folds==5)
-train_data <- allData %>% filter(.folds!=5)
-
-# Predicting diagnoisis from pause duration
-logPauseDur <- glmer(diagnosis ~ 1 + pauseDurationScaled*speechrateScaled*propSpokenTimeScaled + (1 | uID) , data = train_data, family='binomial')
-
-#Confusion matrix
-predicted_values <- predict(logPauseDur, test_data, allow.new.levels = T) 
-
-# Making dataframe with predicted values and uID's
-sum_df <- data.frame(predictions = predicted_values, ID=test_data$uID)
-sum_df <- na.omit(sum_df) 
-# Calculating mean predicted value for each ID
-pred_sum <- aggregate(x = sum_df$predictions, by = list(sum_df$ID), FUN = mean)
-# Making dataframe including only trial one for each participant
-id <- test_data %>% filter(test_data$trial==1)
-
-# Making prediction dataframe with mean predicted value
-pred_df <- data.frame(predictions = pred_sum, actual = id$diagnosis)
-pred_df$predictions.x = ifelse(pred_df$predictions.x < 0, "0", "1")
-pred_df$predictions.x <- as.factor(pred_df$predictions.x) 
-pred_df$actual <- as.factor(pred_df$actual) 
-
-# Making confusion matrix
-caret::confusionMatrix(pred_df$predictions.x, pred_df$actual, positive ="0")
+# Making a dataframe grouped by participant 
+grouped_iqr <- aggregate(x = allData$IQR, by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(IQR=x)
+grouped_sd <- aggregate(x = allData$sd, by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(sd=x)
+grouped_pauseDuration <- aggregate(x = allData$pauseDuration, by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(pauseDuration=x)
+grouped_propSpokenTime <- aggregate(x = allData$propSpokenTime, by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(propSpokenTime=x)
+grouped_speechrate <- aggregate(x = allData$speechrate..nsyll.dur., by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(speechrate=x)
+grouped_diagnosis <- aggregate(x = as.numeric(allData$diagnosis), by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(diagnosis=x)
+grouped_study <- aggregate(x = as.numeric(allData$study), by = list(allData$uID), FUN = mean, na.rm=T) %>% dplyr::rename(study=x)
 
 
+merged_grouped <- merge(grouped_iqr, grouped_pauseDuration, by="Group.1")
+merged_grouped <- merge(merged_grouped, grouped_propSpokenTime, by="Group.1")
+merged_grouped <- merge(merged_grouped, grouped_speechrate, by="Group.1")
+merged_grouped <- merge(merged_grouped, grouped_sd, by="Group.1")
+merged_grouped <- merge(merged_grouped, grouped_study, by="Group.1")
+merged_grouped <- merge(merged_grouped, grouped_diagnosis, by="Group.1")
+
+groupedData <- merged_grouped %>% dplyr::rename(uID=Group.1)
+
+write_csv(merged_grouped, "groupedData.csv")
 
 
-# Predicting diagnoisis from pitch
-logPitch <- glmer(diagnosis ~ 1 + pitchScaled + (1 | uID) , data = train_data, family='binomial')
+merged_grouped %>% 
+  group_by(diagnosis) %>%
+  summarize(participant=n(), 
+            pauseDur = mean(pauseDuration, na.rm=T))
+                                                     
+# loading grouped data
+groupedData$diagnosis <- as.factor(groupedData$diagnosis)
+```
 
-#Confusion matrix
-predicted_pitch <- predict(logPitch, test_data, allow.new.levels = T) 
 
-pred_pitch <- data.frame(predictions = predicted_pitch, actual = test_data$diagnosis)
-pred_pitch$predictions = ifelse(pred_pitch$predictions < 0.0, "0", "1")
-pred_pitch <- na.omit(pred_pitch) 
-pred_pitch$predictions <- as.factor(pred_pitch$predictions) 
-pred_pitch$actual <- as.factor(pred_pitch$actual) 
 
-caret::confusionMatrix(pred_pitch$predictions, pred_pitch$actual, positive ="0")
+# Defining models with grouped data (1 data point pr. participant instead of approx. 10)
+```{r}
+# creating dataframes including relevant variables
+groupedDataIQR <- groupedData %>% 
+  select(uID, diagnosis, study, IQR) %>% drop_na() # Pitch variablity model
+
+groupedDataPause <- groupedData %>% 
+  select(uID, diagnosis, study, pauseDuration) %>% drop_na() # Pause duration model
+
+groupedDataSpeechrate <- groupedData %>% 
+  select(uID, diagnosis, study, speechrate) %>% drop_na() # Speech rate model
+
+groupedDataSpokentime <- groupedData %>% 
+  select(uID, diagnosis, study, propSpokenTime) %>% drop_na() # Proportional of spoken time model
+
+groupedDataSD <-  groupedData %>% 
+  select(uID, diagnosis, study, sd) %>% drop_na() # Standard deviation model
+
+groupedData1 <- groupedData %>% 
+  select(uID, diagnosis, study, IQR, pauseDuration, 
+         speechrate, propSpokenTime) %>% drop_na() # Pitch variablity model
+
+groupedData2 <- groupedData %>% 
+  select(uID, diagnosis, study, IQR, pauseDuration, 
+         speechrate, sd) %>% drop_na() # Pause duration model
+
+groupedData3 <- groupedData %>% 
+  select(uID, diagnosis, study, IQR, pauseDuration, 
+         propSpokenTime, sd) %>% drop_na() # Speech rate model
+
+groupedData4 <- groupedData %>% 
+  select(uID, diagnosis, study, IQR, 
+         speechrate, propSpokenTime, sd) %>% drop_na() # Proportional of spoken time model
+
+groupedData5 <-  groupedData %>% 
+  select(uID, diagnosis, study, pauseDuration, 
+         speechrate, propSpokenTime, sd) %>% drop_na() # Standard deviation model
+
+groupedDataCombined <- groupedData %>% 
+  select(uID, diagnosis, study, IQR, pauseDuration, 
+         speechrate, propSpokenTime, sd) %>% drop_na() # The combined model
+
+```
+
+
+
+# Running models & cross-validation
+```{r}
+# partitioning the data using groupdata2
+df_list <- partition(groupedDataSD, p = 0.2, cat_col = c("diagnosis",'study'), list_out = T)
+
+ # defining the test-set and removing ID-column
+#groupedPred <- df_list[[1]]
+
+df_test <- df_list[[1]]
+df_test <- df_test %>% 
+  select(-uID, -study)
+
+# defining the train-set and removing ID-column
+df_train <- df_list[[2]]
+df_train <- df_train %>% 
+  select(-uID, -study)
+
+
+
+# Defining the recipe for train-data
+# We've removed NAs so no need to check for missing values
+rec <- df_train %>% recipe(diagnosis ~ .) %>% # defines outcome of pre-processing
+  step_center(all_numeric()) %>% # centering all numeric values
+  step_scale(all_numeric()) %>% # scaling all numeric values
+  step_corr(all_numeric()) %>% 
+  prep(training = df_train) # defining the train-set
+
+# extracting 'df_train' from rec_train (the recipe)
+train_baked <- juice(rec)
+test_baked <- rec %>% bake(df_test)
+
+
+# defining model as logistic regression
+log_fit <- 
+  logistic_reg() %>% 
+  set_mode("classification") %>% 
+  set_engine("glm") %>% 
+  fit(diagnosis ~ ., data = train_baked)
+
+# defining model as a support-vector-machine
+svm_fit <- 
+  svm_rbf() %>% 
+  set_mode("classification") %>% 
+  set_engine("kernlab") %>%
+  fit(diagnosis ~ ., data = train_baked)
+
+
+
+# investigating both logistic regression and the SVM-models
+# get multiple at once
+test_results <- 
+  test_baked %>% 
+  select(diagnosis) %>% 
+  mutate(
+    log_class = predict(log_fit, new_data = test_baked) %>% 
+      pull(.pred_class),
+    log_prob  = predict(log_fit, new_data = test_baked, type = "prob") %>% 
+      pull(.pred_1),
+    svm_class = predict(svm_fit, new_data = test_baked) %>% 
+      pull(.pred_class),
+    svm_prob  = predict(svm_fit, new_data = test_baked, type = "prob") %>% 
+      pull(.pred_1)
+  )
+
+
+#  Investigating the metrics
+metrics(test_results, truth = diagnosis, estimate = log_class) %>% 
+  knitr::kable()
+
+# extracting metrics of log_class
+test_results %>%
+  select(diagnosis, log_class, log_prob) %>%
+  knitr::kable()
+
+
+# Plotting area-under-the-curve (ROC-curve)
+test_results %>% 
+  roc_curve(truth = diagnosis, log_prob) %>%
+  autoplot()
+
+# Cross validation of grouped data
+cv_folds <- vfold_cv(df_train, v = 5, repeats = 2, strata = diagnosis, group = uID)
+
+#prepare data set and fetch train data
+cv_folds <- cv_folds %>% 
+  mutate(recipes = splits %>%
+           # prepper is a wrapper for `prep()` which handles `split` objects
+           map(prepper, recipe = rec),
+         train_data = splits %>% map(training))
+
+# train model of each fold
+  # create a non-fitted model
+log_fit <- 
+  logistic_reg() %>%
+  set_mode("classification") %>% 
+  set_engine("glm")
+
+cv_folds <- cv_folds %>%  mutate(
+  log_fits = pmap(list(recipes, train_data), #input 
+                            ~ fit(log_fit, formula(.x), data = bake(object = .x, new_data = .y)) # function to apply
+                 ))
+
+predict_log <- function(split, rec, model) {
+  # IN
+    # split: a split data
+    # rec: recipe to prepare the data
+    # 
+  # OUT
+    # a tibble of the actual and predicted results
+  baked_test <- bake(rec, testing(split))
+  tibble(
+    actual = baked_test$diagnosis,
+    predicted = predict(model, new_data = baked_test) %>% pull(.pred_class),
+    prop_sui =  predict(model, new_data = baked_test, type = "prob") %>% pull(.pred_1),
+    prop_non_sui =  predict(model, new_data = baked_test, type = "prob") %>% pull(`.pred_0`)
+  ) 
+}
+
+# apply our function to each split, which their respective recipes and models (in this case log fits) and save it to a new col
+cv_folds <- cv_folds %>% 
+  mutate(pred = pmap(list(splits, recipes, log_fits) , predict_log))
+
+
+eval <- cv_folds %>% 
+  mutate(
+    metrics = pmap(list(pred), ~ metrics(., truth = actual, estimate = predicted, prop_sui))) %>% 
+  select(id, id2, metrics) %>% 
+  unnest(metrics)
+
+#inspect performance metrics
+ eval %>% 
+  select(repeat_n = id, fold_n=id2,metric = .metric, estimate = .estimate) %>% 
+  spread(metric, estimate) %>% 
+  head() %>% 
+  knitr::kable()
+```
+
+
+
+
+# Making a combined prediction from multiple models
+```{r}
+dataList = list(groupedData1, groupedData2, groupedData3,
+            groupedData4, groupedData5, groupedDataCombined)
+
+for (df in dataList){
+  df_list <- partition(df, p = 0.2, cat_col = c("diagnosis", "study"), list_out = T)
+  
+  # define test-set
+  df_test <- df_list[[1]]
+  df_test <- df_test %>% 
+  select(-uID, -study)
+
+  # define train-set
+  df_train <- df_list[[2]]
+  df_train <- df_train %>% 
+  select(-uID, -study)
+  
+  # Defining the recipe for train-data
+  # We've removed NAs so no need to check for missing values
+  rec <- df_train %>% recipe(diagnosis ~ .) %>% # defines outcome of pre-processing
+    step_center(all_numeric()) %>% # centering all numeric values
+    step_scale(all_numeric()) %>% # scaling all numeric values
+    step_corr(all_numeric()) %>% 
+    prep(training = df_train) # defining the train-set
+
+  # extracting 'df_train' from rec_train (the recipe)
+  train_baked <- juice(rec)
+  test_baked <- rec %>% bake(df_test)
+
+
+  # defining model as logistic regression
+  log_fit <- 
+    logistic_reg() %>% 
+    set_mode("classification") %>% 
+    set_engine("glm") %>% 
+    fit(diagnosis ~ ., data = train_baked)
+  
+  # defining model as a support-vector-machine
+  svm_fit <- 
+    svm_rbf() %>% 
+    set_mode("classification") %>% 
+    set_engine("kernlab") %>%
+    fit(diagnosis ~ ., data = train_baked)
+  
+  # getting test-results
+  test_results <- test_baked %>% 
+    select(diagnosis) %>% 
+    mutate(
+      log_class = predict(log_fit, new_data = test_baked) %>% 
+        pull(.pred_class),
+      log_prob  = predict(log_fit, new_data = test_baked, type = "prob") %>% 
+        pull(.pred_1),
+      svm_class = predict(svm_fit, new_data = test_baked) %>% 
+        pull(.pred_class),
+      svm_prob  = predict(svm_fit, new_data = test_baked, type = "prob") %>% 
+        pull(.pred_1)
+    )
+  
+    #  Investigating the metrics
+  metrics(test_results, truth = diagnosis, estimate = log_class) %>% 
+    knitr::kable()
+  
+  # extracting metrics of log_class
+  test_results <- test_results %>%
+    select(diagnosis, log_class, log_prob) %>% 
+    mutate(log_prob = log_prob-0.5,
+           diagnosis = as.numeric(diagnosis)-1,
+           log_class = as.numeric(log_class)-1) 
+  
+  if (NROW(allPredictions) < 1)  {
+        allPredictions <- test_results
+  } else {
+    allPredictions <- cbind(allPredictions, test_results)
+  }
+}
+
+allPredictions <- data.frame()
+
+absmax <- function(x) {x[which.max ( abs(x) )]}
+
+ulala <- list()
+  
+for (i in 1:44){
+  ulala[i] <- absmax(allPredictions[i, c(3, 6, 9, 12, 15, 18)])
+}
+
+ulala <- unlist(transpose(ulala))
+
+
+absAllPredictions <- allPredictions
+absAllPredictions[, c(3, 6, 9, 12, 15, 18)] <- abs(allPredictions[, c(3, 6, 9, 12, 15, 18)])
+
+sumLogProb = absAllPredictions[,3]+absAllPredictions[,6]+absAllPredictions[,9]+absAllPredictions[,12]+absAllPredictions[,15]+absAllPredictions[,18]
+
+final <- absAllPredictions[,2]*(absAllPredictions[,3]/sumLogProb)+absAllPredictions[,5]*(absAllPredictions[,6]/sumLogProb)+absAllPredictions[,8]*(absAllPredictions[,9]/sumLogProb)+absAllPredictions[,11]*(absAllPredictions[,12]/sumLogProb)+absAllPredictions[,14]*(absAllPredictions[,15]/sumLogProb)+absAllPredictions[,17]*(absAllPredictions[,18]/sumLogProb)
+
+simplePred <- absAllPredictions[,2]+absAllPredictions[,5]+absAllPredictions[,8]+absAllPredictions[,11]+absAllPredictions[,14]+absAllPredictions[,17]
+
+
+predData <- data.frame(predictions=final, actual=allPredictions[,1])
+predData$predDiagnosis <- ifelse(predData$predictions < 0.5, "0", "1")
+predData$predDiagnosis <- as.factor(predData$predDiagnosis)
+predData$actual <- as.factor(predData$actual)
+
+caret::confusionMatrix(predData$predDiagnosis, predData$actual, positive="0")
+
+predData2 <- data.frame(predictions=ulala, actual=allPredictions[,1])
+predData2$predDiagnosis <- ifelse(predData2$predictions < 0, "0", "1")
+predData2$predDiagnosis <- as.factor(predData2$predDiagnosis)
+predData2$actual <- as.factor(predData2$actual)
+
+caret::confusionMatrix(predData2$predDiagnosis, predData2$actual, positive="0")
+
+predData3 <- data.frame(predictions=simplePred, actual=allPredictions[,1])
+predData3$predDiagnosis <- ifelse(predData3$predictions < 3 , "0", "1")
+predData3$predDiagnosis <- as.factor(predData3$predDiagnosis)
+predData3$actual <- as.factor(predData3$actual)
+
+caret::confusionMatrix(predData3$predDiagnosis, predData3$actual, positive="0")
+
+prediction_df <- data.frame(predWeight=as.numeric(predData$predDiagnosis)-1, predMax=as.numeric(predData2$predDiagnosis)-1, predSum=as.numeric(predData3$predDiagnosis)-1, actual=allPredictions[,1])
+prediction_df$predDiagnosis <- ifelse(prediction_df$predWeight+prediction_df$predMax+prediction_df$predSum < 2, "0", "1")
+prediction_df$predDiagnosis <- as.factor(prediction_df$predDiagnosis)
+prediction_df$actual <- as.factor(prediction_df$actual)
+
+caret::confusionMatrix(prediction_df$predDiagnosis, prediction_df$actual, positive="0")
+```
+
+```{r}
+p_load(caretEnsemble, caret, randomForest)
+train_ensemble <- groupedData %>% select(-uID)
+train_ensemble <- na.omit(train_ensemble)
+train_ensemble$diagnosis <- as.factor(train_ensemble$diagnosis)
+str(train_ensemble)
+levels(train_ensemble$diagnosis) <- c('control', 'schizo')
+
+control <- trainControl(method="repeatedcv", number=5, repeats=2, savePredictions=TRUE, classProbs=TRUE)
+algorithmList <- c('lda','svmRadial','rpart', 'glm', 'knn')
+model <- caretList(diagnosis~. , data=train_ensemble, trControl=control, methodList=algorithmList)
+results <- resamples(model)
+summary(results)
+dotplot(results)
+
+# correlation between results
+modelCor(results)
+splom(results)
+
+# stack using glm
+stackControl <- trainControl(method="repeatedcv", number=5, repeats=2, savePredictions=TRUE, classProbs=TRUE)
+stack.glm <- caretStack(model, method="glm", metric="Accuracy", trControl=stackControl)
+print(stack.glm)
+
+# stack using random forest
+stack.rf <- caretStack(model, method="rf", metric="Accuracy", trControl=stackControl)
+print(stack.rf)
 ```
 

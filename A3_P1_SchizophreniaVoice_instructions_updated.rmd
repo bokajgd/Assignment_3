@@ -120,8 +120,8 @@ library(goeveg)
 library(DescTools)
 library(dplyr)
 library(lmerTest)
-install.packages("effsize")
 library(effsize)
+
 
 # Define function read_pitch()
 read_pitch <- function(filename) {
@@ -150,7 +150,8 @@ read_pitch <- function(filename) {
 
 # when you've created a function that works, you can
 pitch_data = list.files(path = "~/Desktop/Cognitive Science/Cognitive Science 3rd semester/Experimental Methods 3/Afleveringer/Assignment_3/data/Pitch", pattern = ".txt", full.names = TRUE)
-pitch_data <- pitch_data %>% ppurrr::map_df(read_pitch)
+pitch_data <- pitch_data %>% map_df(read_pitch)
+
 
 
 # Writing a csv of the data-file
@@ -237,12 +238,12 @@ data %>%
               male = sum(Gender=="M", na.rm = T),
               female = sum(Gender=="F", na.rm = T),
               age = mean(Age, na.rm = T),
-              Negative_symptoms = mean(SANS, na.rm = T),
-              Positive_symptoms = mean(SAPS, na.rm = T),
-              IQ = mean(TotalIQ, na.rm = T),
-              meanPitch = mean(mean, na.rm = T),
-              medianPitch = median(median, na.rm = T),
-              sdPitch = mean(sd, na.rm = T)
+              SpokenTime = mean(propSpokenTime, na.rm = T),
+              PauseDuration = mean(pauseDuration, na.rm = T),
+              sd = mean(sd, na.rm = T),
+              speechrate = mean(speechrate..nsyll.dur., na.rm = T),
+              sdPitch = mean(sd, na.rm = T),
+              iqrPitch = mean(IQR, na.rm = T)
     )
 
 # merging by study
@@ -272,7 +273,7 @@ data %>%
               Negative_symptoms = mean(SANS, na.rm = T),
               Positive_symptoms = mean(SAPS, na.rm = T),
               IQ = mean(TotalIQ, na.rm = T),
-              meanPitch = mean(mean, na.rm = T),
+              meanIQR = mean(IQR, na.rm = T),
               medianPitch = median(median, na.rm = T),
               sdPitch = mean(sd, na.rm = T)
     )
@@ -296,7 +297,6 @@ N.N.N.B. If you want to estimate the studies separately, you can try this syntax
 - Bonus points: cross-validate the models and report the betas and standard errors from all rounds to get an idea of how robust the estimates are. 
 
 ```{r}
-
 # Calculate proportion of spoken time
 data$propSpokenTime <- data$phonationtime..s./data$dur..s.
 
@@ -315,7 +315,9 @@ data <- data %>% group_by(study) %>% mutate(pitchScaled = scale(mean),
                                            speechrateScaled = scale(speechrate..nsyll.dur.),
                                            pauseDurationScaled = scale(pauseDuration),
                                            propSpokenTimeScaled = scale(propSpokenTime),
-                                           medianPitchScaled = scale(median))
+                                           medianPitchScaled = scale(median),
+                                           IQRscaled = scale(IQR),
+                                           SDscaled = scale(sd))
 
 # Changing study column to factor
 data$study <- as.factor(data$study)
@@ -323,29 +325,49 @@ data$study <- as.factor(data$study)
 # Estimating the studies seperately 
 byStudyPause <- lmer(pauseDurationScaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
 summary(byStudyPause)
+diff_pause <- summary(byStudyPause)$coefficients[5:8,1]-summary(byStudyPause)$coefficients[1:4,1]
+diff_pause
 
-byStudyPitch <- lmer(pitchScaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
+byStudyPitch <- lmer(IQRscaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
 summary(byStudyPitch)
+diff_pitch <- summary(byStudyPitch)$coefficients[5:8,1]-summary(byStudyPitch)$coefficients[1:4,1]
+diff_pitch
+
+byStudyPitchSD <- lmer(SDscaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
+summary(byStudyPitchSD)
+diff_pitchsd <- summary(byStudyPitchSD)$coefficients[5:8,1]-summary(byStudyPitchSD)$coefficients[1:4,1]
+diff_pitchsd
 
 byStudySpeechrate <- lmer(speechrateScaled ~ 0 + study + diagnosis:study + (1 | uID), data=data)
 summary(byStudySpeechrate)
+diff_speechrate <- summary(byStudySpeechrate)$coefficients[5:8,1]-summary(byStudySpeechrate)$coefficients[1:4,1]
+diff_speechrate
 
 byStudySpokenTime <- lmer(propSpokenTime ~ 0 + study + diagnosis:study + (1 | uID), data=data)
 summary(byStudySpokenTime)
-
+diff_spokentime <- summary(byStudySpokenTime)$coefficients[5:8,1]-summary(byStudySpokenTime)$coefficients[1:4,1]
+diff_spokentime
 
 # Modelling all of the data
-modelPause <- lmer(pauseDurationScaled ~ 1 + diagnosis + (1 + study | uID) , data = data)
+modelPause <- lmer(pauseDurationScaled ~ 1 + diagnosis + (1 | uID) , data = data)
 summary(modelPause)
+effsize::cohen.d.formula(data$pauseDurationScaled ~ data$diagnosis, na.rm=T, pooled=T, hedges=T)
 
-modelPitch <- lmer(pitchScaled ~ 1 + diagnosis + (1 + study | uID) , data = data)
+modelPitch <- lmer(IQRscaled ~ 1 + diagnosis + (1 | uID) , data = data)
 summary(modelPitch)
+effsize::cohen.d.formula(data$IQRscaled ~ data$diagnosis, na.rm=T, pooled=T, hedges=T)
 
-modelSpeechrate <- lmer(speechrateScaled ~ 1 + diagnosis + (1 + study | uID) , data = data)
+modelSpeechrate <- lmer(speechrateScaled ~ 1 + diagnosis + (1 | uID) , data = data)
 summary(modelSpeechrate)
+effsize::cohen.d.formula(data$speechrateScaled ~ data$diagnosis, na.rm=T, pooled=T, hedges=T)
 
-modelPropSpokenTime <- lmer(propSpokenTime ~ 1 + diagnosis + (1 + study | uID) , data = data)
+modelSD <- lmer(SDscaled ~ 1 + diagnosis + (1 | uID) , data = data)
+summary(modelSD)
+effsize::cohen.d.formula(data$SDscaled ~ data$diagnosis, na.rm=T, pooled=T, hedges=T)
+
+modelPropSpokenTime <- lmer(propSpokenTimeScaled ~ 1 + diagnosis + (1 | uID) , data = data)
 summary(modelPropSpokenTime)
+effsize::cohen.d.formula(data$propSpokenTimeScaled ~ data$diagnosis, na.rm=T, pooled=T, hedges=T)
 
 # Save final data as csv
 write_csv(data, "full_data.csv")
