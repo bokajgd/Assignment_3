@@ -263,7 +263,7 @@ data %>%
               sdPitch = mean(sd, na.rm = T)
     )
 
-# Group by study and diagnosis
+# Grouping by study and diagnosis
 data %>% 
     filter(trial == 1) %>% 
     group_by(study, diagnosis) %>% 
